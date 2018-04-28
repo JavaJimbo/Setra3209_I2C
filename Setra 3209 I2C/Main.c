@@ -1,4 +1,3 @@
-
 /***********************************************************************************************************
  * Setra 3209 Cal System
  * Written for PIC32MX795 using XC32 compiler V 1.30
@@ -6,6 +5,7 @@
  * 
  * 04-23-18: Reading, writing to NVRAM and ERASE, RECALL, and STORE all work.
  *              Questions about CHARGE PUMP bits.
+ * 04-25-18: 
  ************************************************************************************************************/
 
 #define DIAGNOSTICS
@@ -173,7 +173,7 @@ unsigned short numBytes = 128;
 unsigned char ptrDataIn[MAXBUFFER];        
 unsigned short i = 0;    
     
-    for (i = 0; i < numBytes; i++) ptrDataOut[i] = i * 3;
+    for (i = 0; i < numBytes; i++) ptrDataOut[i] = i * 5;
     
     InitializeSystem();   
    
@@ -196,7 +196,7 @@ unsigned short i = 0;
     StorePcapNVRAM();
     
     while(1);
-    */    
+    */
     
     //printf ("\rWRITE NEW DATA AND STORE IN NVRAM");
     //PcapWriteNVRAM(0x00, ptrDataOut, numBytes);   
