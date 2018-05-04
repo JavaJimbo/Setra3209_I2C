@@ -71,13 +71,12 @@ UINT16 update_crc_16(UINT16 crc, char nextVal) {
 //  If addCRCtoPacket is TRUE, the CRC is converted to a string
 //  and added to the end of ptrPacket.
 //  The CRC value is also returned as integer
-
 UINT16 CRCcalculate(char *ptrPacket, BOOL addCRCtoPacket) {
     UINT16 CRCresult;
     int i, length;
 
     length = strlen(ptrPacket);
-    if (length > (BUFFERSIZE - 8)) {
+    if (length > (MAXBUFFER - 8)) {
         ptrPacket = NULL;
         return (0);
     }
@@ -99,15 +98,15 @@ BOOL CRCcheck(char *ptrPacket) {
 	char *ptrCRC;
 	char strCRC[8];	
     int intCRCvalue, intCRCcheck;
-
+    
 	if (ptrPacket == NULL) return (FALSE);
 								
 	ptrCRC = strchr(ptrPacket, '[');		// Find the bracket marking the beginning of the CRC, for example: [A2C5]	
-	if (ptrCRC == NULL) return (FALSE);		// Make sure bracket has been found
+	if (ptrCRC == NULL) return (TRUE);		// Make sure bracket has been found    $$$$
 											// Once this routine has completed, CRC will no longer be needed,
 	ptrCRC[0] = '\0';						// So terminate string at first bracket.
 											// Now when routine is done, ptrPacket will only include data before CRC
-											// This will make it easier to process data.
+											// This makes it easier to process data.
     strCRC[0] = '0';
     strCRC[1] = 'x';        
 	strCRC[2] = ptrCRC[1];
