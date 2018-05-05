@@ -5,7 +5,9 @@
  * 
  * 04-23-18: Reading, writing to NVRAM and ERASE, RECALL, and STORE all work.
  *              Questions about CHARGE PUMP bits.
- * 5-4-18:  Completed routines for writing and reading entire NVRAM.
+ * 5-4-18:  Completed routines for writing and reading entire NVRAM memory MAP.           
+ * 5-5-18:  Minor cleanup. Works with Setra3209CalSystem program.
+ *          Responses to all commands from host should start with "!OK"
  ************************************************************************************************************/
 #define DIAGNOSTICS
 
@@ -90,14 +92,13 @@
 /** PRIVATE PROTOTYPES *********************************************/
 void InitializeSystem(void);
 unsigned char   processInputString(unsigned char *ptrBuffer);
-unsigned char   executeCommand(unsigned char *ptrCommand, unsigned char *ptrValue, int numDataBytes);
+unsigned char   executeCommand(unsigned char *ptrCommand, unsigned char *ptrValue, unsigned short numDataBytes);
 unsigned char   setPWM(unsigned char *ptrPWMstring);
 unsigned char   setOutput(unsigned char *ptrPin, unsigned char *ptrPinState);
 unsigned char   diagnosticsPrintf(unsigned char *ptrString);
 unsigned char   sendToUART(unsigned char UartID, unsigned char *ptrUARTpacket);
 extern BOOL     CRCcheck(char *ptrPacket);
 extern UINT16   CRCcalculate(char *ptrPacket, BOOL addCRCtoPacket);
-// unsigned char   TestWriteNVRAM();
 unsigned char   OpenPcapI2C();
 unsigned char   PCAPPowerOnReset();
 unsigned char   InitializePCAP();
@@ -111,17 +112,14 @@ unsigned char   TestRead(unsigned char *ptrReply);
 unsigned char   replyToHost(unsigned char *ptrMessage);
 unsigned char   WriteCompleteNVRAM(void);
 
-
-unsigned char outBuffer[MAXBUFFER] = "This is exactly what I was spewing about";
-unsigned char inBuffer[MAXBUFFER] = "";
 unsigned char HOSTRxBuffer[MAX_RX_BUFFERSIZE];
 unsigned char HOSTRxBufferFull = false;
 unsigned char HOSTTxBuffer[MAX_TX_BUFFERSIZE];
 unsigned char HOSTTxBufferFull = false;
 
-
+unsigned short NVRAMsize = 0;
 unsigned char NVRAMdata[MAX_NVRAM_ADDRESS];
-void clearNVRAM(void);
+void ClearNVRAMdata(void);
 
 
 void main(void){   
@@ -130,66 +128,13 @@ unsigned char ptrDataIn[MAXBUFFER], ptrDataOut[MAXBUFFER];
 unsigned short i, j;
     
     InitializeSystem();   
-    clearNVRAM();
+    ClearNVRAMdata();
    
-    // printf ("\rSTART UP");
     OpenPcapI2C();    
     PCAPPowerOnReset(); 
     InitializePCAP();       
     RecallPcapNVRAM();    
-    //PcapWriteNVRAM(0x00, ptrTestDataOut, 8);
-    //DelayMs(20);
-    //StorePcapNVRAM();
-    
-    /*
-    printf ("\rERASE");
-    DelayMs(100);
-    ErasePcapNVRAM();
-    DelayMs(100);    
-    
-    printf ("\rSET CHARGE PUMP BITS");
-    ptrDataOut[0] = 0x00;
-    ptrDataOut[1] = 0x00;    
-    PcapWriteNVRAM(62 + CONFIG_ADDRESS, ptrDataOut, 2);   
-    DelayMs(100);
-    StorePcapNVRAM();    
-    while(1);
-    */
-    
-    /*
-    printf ("\rWRITE NEW DATA AND STORE IN NVRAM");    
-    
-    unsigned short NVRAMaddress = 0;
-    unsigned char ptrData[32] = {0,0,0,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26};
-    numBytes = 16;
-    PcapWriteNVRAM(NVRAMaddress, &ptrData[3], numBytes);
-    DelayMs(10);
-    StorePcapNVRAM();                  
-    printf ("\rRECALL NVRAM AND READ DATA");
-    DelayMs(10);    
-    RecallPcapNVRAM();        
-    DelayMs(10);    
-    PcapReadNVRAM(0x00, ptrDataIn, numBytes);       
-    printf("\rData: \r");    
-    j = 0;
-    for (i = 0; i < numBytes; i++)    
-    {
-        printf("%X, ", ptrDataIn[i]);
-        j++;
-        if (j == 16)
-        {
-            j = 0;
-            printf("\r");
-        }        
-    }
-    while(1);
-    */
-    
-    //unsigned char dummy;
-    //if (!TestRead(&dummy)) printf("\rTEST READ ERROR");
-    //else printf ("Test byte In: %2X", testByteIn);
-    //while(1);
-       
+
     while(1) 
     {
         if (HOSTRxBufferFull) 
@@ -204,7 +149,7 @@ unsigned short i, j;
     
 }
 
-void clearNVRAM(void)
+void ClearNVRAMdata(void)
 {
     unsigned short i;
     for (i = 0; i < MAX_NVRAM_ADDRESS; i++) NVRAMdata[i] = 0x00;
@@ -342,63 +287,37 @@ unsigned char InitializePCAP()
 unsigned char PcapReadNVRAM(unsigned short startAddress, unsigned char *ptrData, unsigned short numBytes, unsigned char displayFlag) 
 {
     unsigned short i;
-    
-    if (displayFlag) printf ("\rREADING %d BYTES @%d:", numBytes, startAddress);
-    
+        
     union {
         unsigned char byte[2];
         unsigned int  integer;	
     } convert;
     #define HighByte byte[1]
     #define LowByte byte[0]        
-    
-    //printf("\rSTART I2C");
+        
     StartI2C(); // Send the Start Bit
     IdleI2C(); // Wait to complete    
     
-    //printf("\rDEVICE WR");
     MasterWriteI2C(PCAP_DEVICE | WR); // Send EEPROM Device ID and WRITE Command    
     IdleI2C(); // Wait to complete
-    if (I2CSTATbits.ACKSTAT) 
-    {
-        printf("\rNO ACK #1"); // Get ACK from EEPROM
-        return false;
-    }        
+    if (I2CSTATbits.ACKSTAT) return false;
     
-    //printf("\rREAD COMMAND");
     convert.integer = startAddress;
     MasterWriteI2C(READ_MEM | (convert.HighByte & 0x03)); // Send opcode ANDed with two high address bits
     IdleI2C(); // Wait to complete
-    if (I2CSTATbits.ACKSTAT) 
-    {
-        printf("\rNO ACK #2"); // Get ACK from EEPROM
-        return false;
-    }                
-
-    //printf("\rSEND ADDRESS");
+    if (I2CSTATbits.ACKSTAT) return false;
+    
     MasterWriteI2C(convert.LowByte); // Send EEPROM low address byte
     IdleI2C(); // Wait to complete
-    if (I2CSTATbits.ACKSTAT) 
-    {
-        printf("\rNO ACK #3"); // Get ACK from EEPROM
-        return false;
-    }                
-    
-    //printf("\rRESTART");
+    if (I2CSTATbits.ACKSTAT) return false;
+
     RestartI2C(); // Now send START sequence again:
     IdleI2C(); // Wait to complete
 
-    //printf("\rDEVICE RD");
     MasterWriteI2C(PCAP_DEVICE | RD); // Send EEPROM Device ID and READ Command     
     IdleI2C(); // Wait to complete    
-    if (I2CSTATbits.ACKSTAT) 
-    {
-        printf("\rNO ACK #4"); // Get ACK from EEPROM
-        return false;
-    }        
-    
-    //printf("\rREAD DATA");
-    // Now receive data bytes:
+    if (I2CSTATbits.ACKSTAT) return false;
+
     for (i = 0; i < numBytes; i++) 
     {
         I2CCONbits.RCEN = 1;
@@ -415,7 +334,6 @@ unsigned char PcapReadNVRAM(unsigned short startAddress, unsigned char *ptrData,
         while (I2CCONbits.ACKEN == 1); // Wait till ACK/NACK sequence is over 
     }    
 
-    //printf("\rSTOP I2C");
     StopI2C();
     IdleI2C();        
     
@@ -431,7 +349,6 @@ unsigned char command[1] = {ACTIVATE_STORE};
         return false;
     if (!SendOpcode(STORE_NVRAM))
         return false;
-    printf("\rSTORE DONE");
     return true;
 }
 
@@ -443,7 +360,6 @@ unsigned char command[1] =  {ACTIVATE_ERASE};
         return false;
     if (!SendOpcode(ERASE_NVRAM))
         return false;
-    printf("\rERASE DONE");
     return true;
 }
 
@@ -455,19 +371,19 @@ unsigned char command[1] =  {ACTIVATE_RECALL};
             return false;
     if (!SendOpcode(RECALL_NVRAM))
         return false;
-    printf("\rRECALL DONE");
     return true;
 }
 
-unsigned char   executeCommand(unsigned char *ptrCommand, unsigned char *ptrData, int numBytes)
+unsigned char executeCommand(unsigned char *ptrCommand, unsigned char *ptrData, unsigned short numBytes)
 {
     char strHexValue[16];
-    char strReply[MAX_TX_BUFFERSIZE] = "OK";
+    char strReply[MAX_TX_BUFFERSIZE] = "!OK";
     unsigned char arrInData[MAXDATABYTES];
     unsigned short NVRAMaddress;
     unsigned short numDataBytes = 0;
     unsigned short i;
     static unsigned char testData = 0x00;
+    unsigned char MyDataByte = 0x00;
     
     union {
         unsigned char byte[2];
@@ -516,21 +432,8 @@ unsigned char   executeCommand(unsigned char *ptrCommand, unsigned char *ptrData
     }
     else if (!strcmp(ptrCommand, "RCONFIG"))
     {
-    } 
-    else if (!strcmp(ptrCommand, "DOWNLOAD_MAP"))
-    {        
-        convert.byte[0] = ptrData[0];
-        convert.byte[1] = ptrData[1];
-        numDataBytes = convert.integer;       
-        
-        if (numDataBytes > MAX_NVRAM_ADDRESS)
-            strcpy(strReply, "!ADDRESS_OUT_OF_RANGE");
-        else
-        {
-            for (i = 0; i < numDataBytes; i++)
-                NVRAMdata[i] = ptrData[i + 2];
-        }
-    }    
+    }        
+    /*
     else if (!strcmp(ptrCommand, "WRITE"))
     {        
         numDataBytes = ptrData[0];
@@ -543,7 +446,7 @@ unsigned char   executeCommand(unsigned char *ptrCommand, unsigned char *ptrData
         if (!PcapWriteNVRAM(NVRAMaddress, &ptrData[3], numDataBytes, false))
             strcpy(strReply, "!I2C_ERROR");        
                 
-    }
+    }    
     else if (!strcmp(ptrCommand, "WR"))
     {        
         numDataBytes = ptrData[0];
@@ -556,8 +459,8 @@ unsigned char   executeCommand(unsigned char *ptrCommand, unsigned char *ptrData
         if (!PcapWriteNVRAM(NVRAMaddress, &ptrData[3], numDataBytes, true))
             strcpy(strReply, "!I2C_ERROR");        
                 
-    }
-    
+    }        
+    */
     else if (!strcmp(ptrCommand, "READ"))
     {        
         numDataBytes = ptrData[0];
@@ -574,7 +477,7 @@ unsigned char   executeCommand(unsigned char *ptrCommand, unsigned char *ptrData
             strcpy(strReply, "!I2C_ERROR");
         else 
         {         
-            strcpy(strReply, "OK ");
+            strcpy(strReply, "!OK ");
             for (i = 0; i < numDataBytes; i++)
             {
                 char strData[16];
@@ -613,7 +516,7 @@ unsigned char   executeCommand(unsigned char *ptrCommand, unsigned char *ptrData
             strcpy(strReply, "!I2C_ERROR");
         else 
         {         
-            strcpy(strReply, "OK ");
+            strcpy(strReply, "!OK ");
             for (i = 0; i < numDataBytes; i++)
             {           
                 int length = sprintf(strHexValue, "%02X ", arrInData[i]);
@@ -623,33 +526,16 @@ unsigned char   executeCommand(unsigned char *ptrCommand, unsigned char *ptrData
             }
         }
     } 
+    /*
     else if (!strcmp(ptrCommand, "TEST_MAP"))
-    {
-        // TestWriteNVRAM();
-        
+    {        
         for (i = 0; i < MAX_NVRAM_ADDRESS; i++)
         {
             NVRAMdata[i] = testData++;
             if (testData == 0xFF) testData = 0x00;
         }
     }
-    else if (!strcmp(ptrCommand, "UPLOAD_MAP"))
-    {        
-        convert.byte[0] = ptrData[0];
-        convert.byte[1] = ptrData[1];
-        numDataBytes = convert.integer;       
-        
-        if (numDataBytes > MAX_NVRAM_ADDRESS)
-            strcpy(strReply, "!ADDRESS_OUT_OF_RANGE");
-        else
-        {
-            for (i = 0; i < numDataBytes; i++)
-            {
-                sprintf(strHexValue, " %02X", NVRAMdata[i]);
-                strcat(strReply, strHexValue);
-            }
-        }
-    }        
+    */
     else if (!strcmp(ptrCommand, "PRINT_MAP"))
     {
         for (i = 0; i < MAX_NVRAM_ADDRESS; i++)
@@ -659,7 +545,40 @@ unsigned char   executeCommand(unsigned char *ptrCommand, unsigned char *ptrData
         }
     }    
     else if (!strcmp(ptrCommand, "CLEAR_MAP"))
-        clearNVRAM();
+        ClearNVRAMdata();
+    else if (!strcmp(ptrCommand, "UPLOAD_MAP"))
+    {        
+        convert.byte[0] = ptrData[0];
+        convert.byte[1] = ptrData[1];
+        NVRAMaddress = convert.integer;   
+        
+        strReply[0] = '\0';        
+        if ((NVRAMaddress + 16) > MAX_NVRAM_ADDRESS)
+            strcpy(strReply, "!ADDRESS_OUT_OF_RANGE");
+        else
+        {
+            strcpy(strReply, "!OK ");
+            for (i = NVRAMaddress; i < (NVRAMaddress + 16); i++)
+            {
+                sprintf(strHexValue, " %02X", NVRAMdata[i]);
+                strcat(strReply, strHexValue);
+            }
+        }
+    }        
+    else if (!strcmp(ptrCommand, "DOWNLOAD_MAP"))
+    {                
+        convert.byte[0] = ptrData[0];
+        convert.byte[1] = ptrData[1];
+        NVRAMaddress = convert.integer;                        
+        
+        if ((NVRAMaddress + 16) > MAX_NVRAM_ADDRESS)
+            strcpy(strReply, "!ADDRESS_OUT_OF_RANGE");
+        else
+        {            
+            for (i = 0; i < 16; i++)
+                NVRAMdata[i + NVRAMaddress] = ptrData[i+2];
+        }
+    }         
     else strcpy(strReply, "!ERROR UNRECOGNIZED COMMAND");
     
     replyToHost(strReply);
@@ -738,83 +657,6 @@ unsigned char processInputString(unsigned char *ptrBuffer)
     else return (false);
 }
 
-/*
-unsigned char TestWriteNVRAM()
-{    
-    static unsigned char testData = 0x00;
-    
-    union {
-        unsigned char byte[2];
-        unsigned int  integer;	
-    } convert;
-    #define HighByte byte[1]
-    #define LowByte byte[0]    
-    int i;
-
-    printf ("\rSTART WRITING NVRAM...");
-    
-    // WRITE DATA
-    StartI2C(); // Send the Start Bit
-    IdleI2C(); // Wait to complete    
-
-    MasterWriteI2C(PCAP_DEVICE | WR); // Send EEPROM Device ID and WRITE Command    
-    IdleI2C(); // Wait to complete
-    if (I2CSTATbits.ACKSTAT) 
-    {
-        printf("\rNO ACK #1"); // Get ACK from EEPROM
-        return false;
-    }
-    
-    convert.integer = 0x00;
-    MasterWriteI2C(WRITE_MEM | (convert.HighByte & 0x03)); // Send opcode ANDed with two high address bits    
-    IdleI2C(); // Wait to complete
-    if (I2CSTATbits.ACKSTAT) 
-    {
-        printf("\rNO ACK #2"); // Get ACK from EEPROM    
-        return false;
-    }
-
-    MasterWriteI2C(convert.LowByte); // Send EEPROM low address byte    
-    IdleI2C(); // Wait to complete
-    if (I2CSTATbits.ACKSTAT)
-    {
-        printf("\rNO ACK #3"); // Get ACK from EEPROM    
-        return false;
-    }
-
-    // Now send test data
-    for (i = 0; i < 960; i++) {
-        testData++;
-        if (testData > 254) testData = 0x00;
-        MasterWriteI2C(testData);        
-        IdleI2C(); //Wait to complete
-        if (I2CSTATbits.ACKSTAT)
-        {
-            printf("\rNO ACK #4"); // Get ACK from EEPROM 
-            return false;
-        }        
-    }    
-    
-    for (i = 0; i < 64; i++) {
-        testData = 0x00;
-        MasterWriteI2C(testData);        
-        IdleI2C(); //Wait to complete
-        if (I2CSTATbits.ACKSTAT)
-        {
-            printf("\rNO ACK #4"); // Get ACK from EEPROM 
-            return false;
-        }        
-    }    
-    
-    
-    StopI2C(); // Send the Stop condition
-    IdleI2C(); // Wait to complete
-    
-    printf ("DONE.");
-
-    return true;
-}
-*/
 
 unsigned char SendOpcode(unsigned char opcode)
 {       
@@ -877,7 +719,7 @@ unsigned char PcapWriteNVRAM(unsigned short startAddress, unsigned char *ptrData
     IdleI2C(); // Wait to complete
     if (I2CSTATbits.ACKSTAT) 
     {
-        printf("\rNO ACK #1"); // Get ACK from EEPROM
+        //printf("\rNO ACK #1"); // Get ACK from EEPROM
         return false;
     }
     
@@ -886,7 +728,7 @@ unsigned char PcapWriteNVRAM(unsigned short startAddress, unsigned char *ptrData
     IdleI2C(); // Wait to complete
     if (I2CSTATbits.ACKSTAT) 
     {
-        printf("\rNO ACK #2"); // Get ACK from EEPROM    
+        //printf("\rNO ACK #2"); // Get ACK from EEPROM    
         return false;
     }
 
@@ -894,7 +736,7 @@ unsigned char PcapWriteNVRAM(unsigned short startAddress, unsigned char *ptrData
     IdleI2C(); // Wait to complete
     if (I2CSTATbits.ACKSTAT)
     {
-        printf("\rNO ACK #3"); // Get ACK from EEPROM    
+        //printf("\rNO ACK #3"); // Get ACK from EEPROM    
         return false;
     }
 
@@ -905,7 +747,7 @@ unsigned char PcapWriteNVRAM(unsigned short startAddress, unsigned char *ptrData
         IdleI2C(); //Wait to complete
         if (I2CSTATbits.ACKSTAT)
         {
-            printf("\rNO ACK #4"); // Get ACK from EEPROM 
+            //printf("\rNO ACK #4"); // Get ACK from EEPROM 
             return false;
         }        
     }    
@@ -913,7 +755,7 @@ unsigned char PcapWriteNVRAM(unsigned short startAddress, unsigned char *ptrData
     StopI2C(); // Send the Stop condition
     IdleI2C(); // Wait to complete
     
-    printf ("DONE.");
+    // printf ("DONE.");
 
     return true;
 }
@@ -933,7 +775,7 @@ unsigned char WriteCompleteNVRAM(void)
     IdleI2C(); // Wait to complete
     if (I2CSTATbits.ACKSTAT) 
     {
-        printf("\rNO ACK #1"); // Get ACK from EEPROM
+        //printf("\rNO ACK #1"); // Get ACK from EEPROM
         return false;
     }    
 
@@ -941,7 +783,7 @@ unsigned char WriteCompleteNVRAM(void)
     IdleI2C(); // Wait to complete
     if (I2CSTATbits.ACKSTAT) 
     {
-        printf("\rNO ACK #2"); // Get ACK from EEPROM    
+        //printf("\rNO ACK #2"); // Get ACK from EEPROM    
         return false;
     }
 
@@ -949,7 +791,7 @@ unsigned char WriteCompleteNVRAM(void)
     IdleI2C(); // Wait to complete
     if (I2CSTATbits.ACKSTAT)
     {
-        printf("\rNO ACK #3"); // Get ACK from EEPROM    
+        //printf("\rNO ACK #3"); // Get ACK from EEPROM    
         return false;
     }
 
@@ -960,7 +802,7 @@ unsigned char WriteCompleteNVRAM(void)
         IdleI2C(); //Wait to complete
         if (I2CSTATbits.ACKSTAT)
         {
-            printf("\rNO ACK #4"); // Get ACK from EEPROM 
+            //printf("\rNO ACK #4"); // Get ACK from EEPROM 
             return false;
         }        
     }    
@@ -968,7 +810,7 @@ unsigned char WriteCompleteNVRAM(void)
     StopI2C(); // Send the Stop condition
     IdleI2C(); // Wait to complete
     
-    printf ("DONE.");
+    // printf ("DONE.");
 
     return true;
 }
