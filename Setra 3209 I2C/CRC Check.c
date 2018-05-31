@@ -102,7 +102,7 @@ BOOL CRCcheck(char *ptrPacket) {
 	if (ptrPacket == NULL) return (FALSE);
 								
 	ptrCRC = strchr(ptrPacket, '[');		// Find the bracket marking the beginning of the CRC, for example: [A2C5]	
-	if (ptrCRC == NULL) return (TRUE);		// Make sure bracket has been found    $$$$
+	if (ptrCRC == NULL) return (FALSE);		// Make sure bracket has been found    
 											// Once this routine has completed, CRC will no longer be needed,
 	ptrCRC[0] = '\0';						// So terminate string at first bracket.
 											// Now when routine is done, ptrPacket will only include data before CRC
