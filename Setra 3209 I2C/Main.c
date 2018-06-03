@@ -11,7 +11,8 @@
  * 5-6-18:	Swapped high and low address bytes.
  * 5-22-18: $OK is response. CRC check is re-enabled.
  * 5-23-18: NO ERASE WRITE STORE
- * 5-30-18: 
+ * 6-02-18: WARWICK: Fixed bug in RETURN RESULT routine that was only returning four data bytes
+ *          Also added "<" to end of all returned strings.
  ************************************************************************************************************/
 
 enum {
@@ -22,8 +23,12 @@ enum {
     STATE_READY
 };
 
-
+// #define TEST_OUT LATBbits.LATB3
 #define DIAGNOSTICS
+
+#define CDC_COMMAND 0b10001100
+#define RDC_COMMAND 0b10001110
+#define DSP_COMMAND 0b10001101
 
 #define CR 13
 #define LF 10
@@ -107,7 +112,7 @@ enum {
 /** PRIVATE PROTOTYPES *********************************************/
 void InitializeSystem(void);
 unsigned char   processInputString(unsigned char *ptrBuffer);
-unsigned char   executeCommand(unsigned char *ptrCommand, unsigned char *ptrValue, unsigned short numDataBytes);
+unsigned char   executeCommand(unsigned char *ptrCommand, unsigned char *ptrValue);
 unsigned char   setPWM(unsigned char *ptrPWMstring);
 unsigned char   setOutput(unsigned char *ptrPin, unsigned char *ptrPinState);
 unsigned char   diagnosticsPrintf(unsigned char *ptrString);
@@ -213,8 +218,9 @@ void InitializeSystem(void) {
     INTSetVectorSubPriority(INT_VECTOR_UART(HOSTuart), INT_SUB_PRIORITY_LEVEL_0);
 
 
-    PORTClearBits(IOPORT_B, BIT_12 | BIT_13 | BIT_14 | BIT_15);
-    mPORTBSetPinsDigitalOut(BIT_12 | BIT_13 | BIT_14 | BIT_15);
+    PORTClearBits(IOPORT_B, BIT_3 | BIT_12 | BIT_13 | BIT_14 | BIT_15);
+    mPORTBSetPinsDigitalOut(BIT_3 | BIT_12 | BIT_13 | BIT_14 | BIT_15);
+
 
     PORTSetPinsDigitalIn(IOPORT_B, BIT_1);
     PORTSetPinsDigitalOut(IOPORT_B, BIT_0);
@@ -315,16 +321,7 @@ unsigned char InitializePCAP()
     return true;
 }
 
-unsigned char StorePcapNVRAM()
-{   
-unsigned char command[1] = {ACTIVATE_STORE};
 
-    if (!PcapWriteNVRAM(MEM_CTRL_REGISTER + CONFIG_ADDRESS, 1, command))
-        return false;
-    if (!SendOpcode(STORE_NVRAM))
-        return false;
-    return true;
-}
 
 unsigned char ErasePcapNVRAM()
 {
@@ -348,17 +345,14 @@ unsigned char command[1] =  {ACTIVATE_RECALL};
     return true;
 }
 
-unsigned char executeCommand(unsigned char *ptrCommand, unsigned char *ptrData, unsigned short numBytes)
+unsigned char executeCommand(unsigned char *ptrCommand, unsigned char *ptrData)
 {
     char strHexValue[16];
-    char strReply[MAX_TX_BUFFERSIZE] = "$OK";
-    unsigned char arrInData[MAX_NVRAM_ADDRESS];
+    char strReply[MAX_TX_BUFFERSIZE] = "$OK";    
     unsigned short NVRAMstartAddress, address;
     unsigned short numDataBytes = 0;
     unsigned char registerAddress = 0;
-    unsigned short i;
-    static unsigned char testData = 0x00;
-    unsigned char MyDataByte = 0x00;
+    unsigned short i;    
     #define MAX_RESULT_REGISTERS 35
     unsigned char arrResultRegister[MAX_RESULT_REGISTERS];
     
@@ -377,14 +371,17 @@ unsigned char executeCommand(unsigned char *ptrCommand, unsigned char *ptrData, 
     {
         if (!InitializePCAP()) strcpy(strReply, "!I2C_ERROR");
     }
-    else if (!strcmp(ptrCommand, "CDC"))
+    else if (!strcmp(ptrCommand, "CDC"))  // $$$$
     {
+        if (!SendOpcode(CDC_COMMAND)) strcpy(strReply, "!I2C_ERROR");
     }
     else if (!strcmp(ptrCommand, "RDC"))
     {
+        if (!SendOpcode(RDC_COMMAND)) strcpy(strReply, "!I2C_ERROR");
     }    
     else if (!strcmp(ptrCommand, "DSP"))
     {
+        if (!SendOpcode(DSP_COMMAND)) strcpy(strReply, "!I2C_ERROR");
     }
     else if (!strcmp(ptrCommand, "STORE"))
     {
@@ -440,7 +437,7 @@ unsigned char executeCommand(unsigned char *ptrCommand, unsigned char *ptrData, 
         else
         {
             strcpy(strReply, "$OK ");
-            for (i = NVRAMstartAddress; i < (NVRAMstartAddress + numDataBytes); i++)
+            for (i = NVRAMstartAddress; i < (NVRAMstartAddress + numDataBytes); i++)  // $$$$
             {
                 sprintf(strHexValue, " %02X", NVRAMdata[i]);
                 strcat(strReply, strHexValue);
@@ -522,20 +519,21 @@ unsigned char executeCommand(unsigned char *ptrCommand, unsigned char *ptrData, 
         numDataBytes = ptrData[1];
         registerAddress = ptrData[0];
         
-        if ((registerAddress + numDataBytes) > MAX_RESULT_REGISTERS)
-            strcpy(strReply, "!REGISTER_OUT_OF_RANGE");        
-        else if (PcapReadResultRegisters(registerAddress, numBytes, arrResultRegister))
-        {        
+        for (i = 0; i < MAX_RESULT_REGISTERS; i++) arrResultRegister[i] = 0;            
+        
+        if ((registerAddress + numDataBytes) > MAX_RESULT_REGISTERS)        
+            strcpy(strReply, "!REGISTER_OUT_OF_RANGE");                    
+        else if (PcapReadResultRegisters(registerAddress, numDataBytes, arrResultRegister))
+        {     
             strcpy(strReply, "$OK ");
             for (i = registerAddress; i < (registerAddress + numDataBytes); i++)
             {
                 sprintf(strHexValue, " %02X", arrResultRegister[i]);
                 strcat(strReply, strHexValue);
-            }                
+            }                 
         }
-        else strcpy(strReply, "!I2C_ERROR");
+        else  strcpy(strReply, "!I2C_ERROR");        
     }       
-    
     
     else if (!strcmp(ptrCommand, "WRITE"))
     {          
@@ -564,7 +562,7 @@ unsigned char executeCommand(unsigned char *ptrCommand, unsigned char *ptrData, 
         }        
     }               
     else strcpy(strReply, "!ERROR UNRECOGNIZED COMMAND");
-    
+    strcat(strReply, "<");
     replyToHost(strReply);
     return true;
 }
@@ -637,7 +635,7 @@ unsigned char processInputString(unsigned char *ptrBuffer)
         }        
     } while (ptrToken != NULL);
 
-    if (executeCommand(ptrCommand, arrByteData, dataIndex)) return (true);
+    if (executeCommand(ptrCommand, arrByteData)) return (true);
     else return (false);
 }
 
@@ -808,9 +806,13 @@ unsigned char   PcapReadResultRegisters(unsigned char registerAddress, unsigned 
     IdleI2C(); // Wait to complete
     if (I2CSTATbits.ACKSTAT) return false;
         
+    //Delay10us(100);
+    
     MasterWriteI2C(READ_RESULT | (registerAddress & 0x3F)); // Send opcode ORed with six address bits
     IdleI2C(); // Wait to complete
     if (I2CSTATbits.ACKSTAT) return false;    
+    
+    //Delay10us(100);
 
     RestartI2C(); // Now send START sequence again:
     IdleI2C(); // Wait to complete
@@ -819,7 +821,7 @@ unsigned char   PcapReadResultRegisters(unsigned char registerAddress, unsigned 
     IdleI2C(); // Wait to complete    
     if (I2CSTATbits.ACKSTAT) return false;
     
-    DelayMs(4); 
+    // DelayMs(4); 
 
     for (i = 0; i < numBytes; i++) 
     {
@@ -841,3 +843,13 @@ unsigned char   PcapReadResultRegisters(unsigned char registerAddress, unsigned 
     return true;
 }
 
+unsigned char StorePcapNVRAM()
+{   
+unsigned char command[1] = {ACTIVATE_STORE};
+
+    if (!PcapWriteNVRAM(MEM_CTRL_REGISTER + CONFIG_ADDRESS, 1, command))
+        return false;
+    if (!SendOpcode(STORE_NVRAM))
+        return false;
+    return true;
+}
