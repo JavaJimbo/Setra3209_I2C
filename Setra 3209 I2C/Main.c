@@ -13,6 +13,9 @@
  * 5-23-18: NO ERASE WRITE STORE
  * 6-02-18: WARWICK: Fixed bug in RETURN RESULT routine that was only returning four data bytes
  *          Also added "<" to end of all returned strings.
+ * 6-06-18: Setra: added leading ">"; Created $HELLO command; 
+ *          Added routine for writing/reading firmware version number.
+ * 6-07-18: Got rid of first and last characters '>' and '<'
  ************************************************************************************************************/
 
 enum {
@@ -112,7 +115,7 @@ enum {
 /** PRIVATE PROTOTYPES *********************************************/
 void InitializeSystem(void);
 unsigned char   processInputString(unsigned char *ptrBuffer);
-unsigned char   executeCommand(unsigned char *ptrCommand, unsigned char *ptrValue);
+unsigned char   executeCommand(unsigned char *ptrCommand, short *ptrValue);
 unsigned char   setPWM(unsigned char *ptrPWMstring);
 unsigned char   setOutput(unsigned char *ptrPin, unsigned char *ptrPinState);
 unsigned char   diagnosticsPrintf(unsigned char *ptrString);
@@ -131,6 +134,7 @@ unsigned char   SendOpcode(unsigned char opcode);
 unsigned char   TestRead(unsigned char *ptrReply);
 unsigned char   replyToHost(unsigned char *ptrMessage);
 unsigned char   PcapReadResultRegisters(unsigned char registerAddress, unsigned short numBytes, unsigned char *ptrData);
+unsigned char   storeVersionString();
 
 unsigned char HOSTRxBuffer[MAX_RX_BUFFERSIZE];
 unsigned char HOSTRxBufferFull = false;
@@ -139,22 +143,24 @@ unsigned char HOSTTxBufferFull = false;
 
 unsigned short NVRAMsize = 0;
 unsigned char NVRAMdata[MAX_NVRAM_ADDRESS];
+unsigned char CopyNVRAMdata[MAX_NVRAM_ADDRESS];
+
 
 #define CHARGE_PUMP_LOW 1022
 #define CHARGE_PUMP_HIGH 1023
-#define chargePumpLowByte NVRAMdata[CHARGE_PUMP_LOW]
-#define chargePumpHighByte NVRAMdata[CHARGE_PUMP_HIGH]
+//  #define chargePumpLowByte NVRAMdata[CHARGE_PUMP_LOW]
+//  #define chargePumpHighByte NVRAMdata[CHARGE_PUMP_HIGH]
 
-void ClearNVRAMdata(void);
+void InitializeNVRAM(void);
 unsigned char PCAPstate = STATE_START;
+#define MAXSTRING 128
+unsigned char strPCapFirmwareVersion[MAXSTRING] = "";
+unsigned char strDataBufferCopy[MAXSTRING];
 
 void main(void){   
-        
-    InitializeSystem();   
-    
-    chargePumpLowByte = chargePumpHighByte = 0x00;
-    ClearNVRAMdata();
-   
+             
+    InitializeSystem();       
+    InitializeNVRAM();   
     OpenPcapI2C();    
 
     while(1) 
@@ -189,14 +195,11 @@ unsigned char sendToUART(unsigned char UartID, unsigned char *ptrUARTpacket)
     else return (false);
 }
 
-void ClearNVRAMdata()
+void InitializeNVRAM()
 {
     unsigned short i;
-    for (i = 0; i < MAX_NVRAM_ADDRESS; i++) 
-    {
-        if (i != CHARGE_PUMP_LOW && i != CHARGE_PUMP_HIGH)
-            NVRAMdata[i] = 0x00;
-    }
+    for (i = 0; i < MAX_NVRAM_ADDRESS; i++)     
+        CopyNVRAMdata[i] = NVRAMdata[i] = 0x00;    
 }
 
 void InitializeSystem(void) {
@@ -245,7 +248,8 @@ void __ISR(HOST_VECTOR, ipl2) IntHostUartHandler(void) {
     } else if (INTGetFlag(INT_SOURCE_UART_RX(HOSTuart))) {
         INTClearFlag(INT_SOURCE_UART_RX(HOSTuart));
         if (UARTReceivedDataIsAvailable(HOSTuart)) {
-            ch = toupper(UARTGetDataByte(HOSTuart));            
+            // ch = toupper(UARTGetDataByte(HOSTuart));
+            ch = UARTGetDataByte(HOSTuart);
             if (ch == '$') HOSTRxIndex = 0;
             if (ch == LF || ch == 0);
             else if (ch == BACKSPACE) {
@@ -345,7 +349,7 @@ unsigned char command[1] =  {ACTIVATE_RECALL};
     return true;
 }
 
-unsigned char executeCommand(unsigned char *ptrCommand, unsigned char *ptrData)
+unsigned char executeCommand(unsigned char *ptrCommand, short *ptrData)
 {
     char strHexValue[16];
     char strReply[MAX_TX_BUFFERSIZE] = "$OK";    
@@ -363,43 +367,57 @@ unsigned char executeCommand(unsigned char *ptrCommand, unsigned char *ptrData)
     #define HighByte byte[1]
     #define LowByte byte[0]    
 
-    if (!strcmp(ptrCommand, "POR"))
+    if (!strcmp(ptrCommand, "HELLO"))
     {
-        if (!PCAPPowerOnReset()) strcpy(strReply, "!I2C_ERROR");
+        strcpy(strReply, "$OK HELLO_WORLD");
+    }
+    else if (!strcmp(ptrCommand, "WRITE_VERSION"))
+    {       
+        if (storeVersionString()) strcpy(strReply, "$OK ");
+        else strcpy(strReply, "$ERROR Bad version string");
+    }    
+    else if (!strcmp(ptrCommand, "READ_VERSION"))
+    {
+        strcpy(strReply, "$OK ");
+        strcat(strReply, strPCapFirmwareVersion);
+    }        
+    else if (!strcmp(ptrCommand, "POR"))
+    {
+        if (!PCAPPowerOnReset()) strcpy(strReply, "$I2C_ERROR");
     }
     else if (!strcmp(ptrCommand, "INIT"))
     {
-        if (!InitializePCAP()) strcpy(strReply, "!I2C_ERROR");
+        if (!InitializePCAP()) strcpy(strReply, "$I2C_ERROR");
     }
     else if (!strcmp(ptrCommand, "CDC"))  // $$$$
     {
-        if (!SendOpcode(CDC_COMMAND)) strcpy(strReply, "!I2C_ERROR");
+        if (!SendOpcode(CDC_COMMAND)) strcpy(strReply, "$I2C_ERROR");
     }
     else if (!strcmp(ptrCommand, "RDC"))
     {
-        if (!SendOpcode(RDC_COMMAND)) strcpy(strReply, "!I2C_ERROR");
+        if (!SendOpcode(RDC_COMMAND)) strcpy(strReply, "$I2C_ERROR");
     }    
     else if (!strcmp(ptrCommand, "DSP"))
     {
-        if (!SendOpcode(DSP_COMMAND)) strcpy(strReply, "!I2C_ERROR");
+        if (!SendOpcode(DSP_COMMAND)) strcpy(strReply, "$I2C_ERROR");
     }
     else if (!strcmp(ptrCommand, "STORE"))
     {
-        if (!StorePcapNVRAM()) strcpy(strReply, "!I2C_ERROR");        
+        if (!StorePcapNVRAM()) strcpy(strReply, "$I2C_ERROR");        
     }
     else if (!strcmp(ptrCommand, "RECALL")) 
     {
-        if (!RecallPcapNVRAM()) strcpy(strReply, "!I2C_ERROR");
+        if (!RecallPcapNVRAM()) strcpy(strReply, "$I2C_ERROR");
     }
     else if (!strcmp(ptrCommand, "ERASE"))
     {
-        if (!ErasePcapNVRAM()) strcpy(strReply, "!I2C_ERROR");        
+        if (!ErasePcapNVRAM()) strcpy(strReply, "$I2C_ERROR");        
     }    
     else if (!strcmp(ptrCommand, "TEST"))
     {
         unsigned char ReplyByte;
-        if (!TestRead(&ReplyByte)) strcpy(strReply, "!I2C_ERROR");
-        else if (ReplyByte != 0x11) sprintf(strReply, "!TEST_READ_ERROR");
+        if (!TestRead(&ReplyByte)) strcpy(strReply, "$I2C_ERROR");
+        else if (ReplyByte != 0x11) sprintf(strReply, "$TEST_READ_ERROR");
     }
     else if (!strcmp(ptrCommand, "WCONFIG"))
     {
@@ -419,21 +437,21 @@ unsigned char executeCommand(unsigned char *ptrCommand, unsigned char *ptrData)
             else printf("%02X, ", NVRAMdata[i]);
         }
     }    
-    else if (!strcmp(ptrCommand, "CLEAR"))
-        ClearNVRAMdata();
+    // else if (!strcmp(ptrCommand, "CLEAR"))
+    //    ClearNVRAMdata();
     else if (!strcmp(ptrCommand, "UPLOAD"))
     {        
-        convert.byte[0] = ptrData[1];
-        convert.byte[1] = ptrData[0];
+        convert.byte[0] = (unsigned char) ptrData[1];
+        convert.byte[1] = (unsigned char) ptrData[0];
         NVRAMstartAddress = convert.integer;   
         
-        convert.byte[0] = ptrData[3];
-        convert.byte[1] = ptrData[2];
+        convert.byte[0] = (unsigned char) ptrData[3];
+        convert.byte[1] = (unsigned char) ptrData[2];
         numDataBytes = convert.integer;       
         
         strReply[0] = '\0';        
         if ((NVRAMstartAddress + numDataBytes) > MAX_NVRAM_ADDRESS)
-            strcpy(strReply, "!ADDRESS_OUT_OF_RANGE");
+            strcpy(strReply, "$ADDRESS_OUT_OF_RANGE");
         else
         {
             strcpy(strReply, "$OK ");
@@ -455,16 +473,16 @@ unsigned char executeCommand(unsigned char *ptrCommand, unsigned char *ptrData)
     }
     else if (!strcmp(ptrCommand, "DOWNLOAD"))
     {                
-        convert.byte[0] = ptrData[1];
-        convert.byte[1] = ptrData[0];
+        convert.byte[0] = (unsigned char) ptrData[1];
+        convert.byte[1] = (unsigned char) ptrData[0];
         NVRAMstartAddress = convert.integer;   
         
-        convert.byte[0] = ptrData[3];
-        convert.byte[1] = ptrData[2];
+        convert.byte[0] = (unsigned char) ptrData[3];
+        convert.byte[1] = (unsigned char) ptrData[2];
         numDataBytes = convert.integer;               
         
         if ((NVRAMstartAddress + numDataBytes) > MAX_NVRAM_ADDRESS)
-            strcpy(strReply, "!ADDRESS_OUT_OF_RANGE");
+            strcpy(strReply, "$ADDRESS_OUT_OF_RANGE");
         else
         {            
             for (i = 0; i < numDataBytes; i++)
@@ -475,54 +493,65 @@ unsigned char executeCommand(unsigned char *ptrCommand, unsigned char *ptrData)
                     // EXCEPT for the two CHARGE PUMP bytes,
                     // which should never be overwritten by external data;
                     if (address != CHARGE_PUMP_LOW && address != CHARGE_PUMP_HIGH)
-                        NVRAMdata[address] = ptrData[i+4]; 
+                        NVRAMdata[address] = (unsigned char) ptrData[i+4]; 
                 }
             }
         }
     }
     else if (!strcmp(ptrCommand, "READ_MAP"))
     {                
-        if (!PcapReadNVRAM(0x0000, 1024, NVRAMdata))
-            strcpy(strReply, "!I2C_ERROR");
+        if (!PcapReadNVRAM(0x0000, MAX_NVRAM_ADDRESS, NVRAMdata))
+            strcpy(strReply, "$I2C_ERROR");
     }       
     else if (!strcmp(ptrCommand, "WRITE_MAP"))
-    {                
-        if (!PcapWriteNVRAM(0x0000, 1024, NVRAMdata))
-            strcpy(strReply, "!I2C_ERROR");        
+    {       
+        for (i = 0; i < MAX_NVRAM_ADDRESS; i++)
+            CopyNVRAMdata[i] = NVRAMdata[i];
+        
+        if (!PcapWriteNVRAM(0x0000, MAX_NVRAM_ADDRESS, NVRAMdata))
+            strcpy(strReply, "$I2C_ERROR");        
     } 
-    
+    else if (!strcmp(ptrCommand, "CHECK_NVRAM"))
+    {
+        for (i = 0; i < MAX_NVRAM_ADDRESS; i++)
+        {
+          if (NVRAMdata[i] != CopyNVRAMdata[i]) break;
+        }
+        if (i == MAX_NVRAM_ADDRESS) strcpy(strReply, "$OK NVRAM WRITE SUCCESS");
+        else strcpy(strReply, "$ERROR NVRAM INCORRECT");
+    }
     else if (!strcmp(ptrCommand, "READ"))
     {        
-        convert.byte[0] = ptrData[1];
-        convert.byte[1] = ptrData[0];
+        convert.byte[0] = (unsigned char) ptrData[1];
+        convert.byte[1] = (unsigned char) ptrData[0];
         NVRAMstartAddress = convert.integer;   
         
-        convert.byte[0] = ptrData[3];
-        convert.byte[1] = ptrData[2];
+        convert.byte[0] = (unsigned char) ptrData[3];
+        convert.byte[1] = (unsigned char) ptrData[2];
         numDataBytes = convert.integer;   
         
         if (PcapReadNVRAM(NVRAMstartAddress, numDataBytes, NVRAMdata))
         {
             // printf("DONE");
-            strcpy(strReply, "\r$OK ");
+            strcpy(strReply, "$OK ");
             for (i = NVRAMstartAddress; i < (NVRAMstartAddress + numDataBytes); i++)
             {
                 sprintf(strHexValue, "%02X ", NVRAMdata[i]);
                 strcat(strReply, strHexValue);
             }                        
         }
-        else strcpy(strReply, "!I2C_ERROR");
+        else strcpy(strReply, "$I2C_ERROR");
     }       
     
     else if (!strcmp(ptrCommand, "READ_RESULT"))
     {        
-        numDataBytes = ptrData[1];
-        registerAddress = ptrData[0];
+        numDataBytes = (unsigned char) ptrData[1];
+        registerAddress = (unsigned char) ptrData[0];
         
         for (i = 0; i < MAX_RESULT_REGISTERS; i++) arrResultRegister[i] = 0;            
         
         if ((registerAddress + numDataBytes) > MAX_RESULT_REGISTERS)        
-            strcpy(strReply, "!REGISTER_OUT_OF_RANGE");                    
+            strcpy(strReply, "$REGISTER_OUT_OF_RANGE");                    
         else if (PcapReadResultRegisters(registerAddress, numDataBytes, arrResultRegister))
         {     
             strcpy(strReply, "$OK ");
@@ -532,22 +561,22 @@ unsigned char executeCommand(unsigned char *ptrCommand, unsigned char *ptrData)
                 strcat(strReply, strHexValue);
             }                 
         }
-        else  strcpy(strReply, "!I2C_ERROR");        
+        else  strcpy(strReply, "$I2C_ERROR");        
     }       
     
     else if (!strcmp(ptrCommand, "WRITE"))
     {          
-        convert.byte[0] = ptrData[1];
-        convert.byte[1] = ptrData[0];
+        convert.byte[0] = (unsigned char) ptrData[1];
+        convert.byte[1] = (unsigned char) ptrData[0];
         NVRAMstartAddress = convert.integer;   
         
-        convert.byte[0] = ptrData[3];
-        convert.byte[1] = ptrData[2];
+        convert.byte[0] = (unsigned char) ptrData[3];
+        convert.byte[1] = (unsigned char) ptrData[2];
         numDataBytes = convert.integer;   
         
         if ((NVRAMstartAddress + numDataBytes) >= MAX_NVRAM_ADDRESS)
         {
-            strcpy(strReply, "!ERROR: ADRESS OUT OF BOUNDS");   
+            strcpy(strReply, "$ERROR: ADRESS OUT OF BOUNDS");   
             return false;
         }        
         //if (!PcapWriteNVRAM(NVRAMstartAddress, numDataBytes, &ptrData[4]))
@@ -558,11 +587,11 @@ unsigned char executeCommand(unsigned char *ptrCommand, unsigned char *ptrData)
             // EXCEPT for the two CHARGE PUMP bytes,
             // which should never be overwritten by external data;
             if (i != CHARGE_PUMP_LOW && i != CHARGE_PUMP_HIGH)
-                NVRAMdata[i] = ptrData[i+4];
+                NVRAMdata[i] = (unsigned char) ptrData[i+4];
         }        
     }               
-    else strcpy(strReply, "!ERROR UNRECOGNIZED COMMAND");
-    strcat(strReply, "<");
+    else strcpy(strReply, "$ERROR UNRECOGNIZED COMMAND");
+    // strcat(strReply, "<");
     replyToHost(strReply);
     return true;
 }
@@ -604,41 +633,6 @@ unsigned char TestRead(unsigned char *ptrReply)
     IdleI2C();        
     return true;
 }
-
-
-unsigned char processInputString(unsigned char *ptrBuffer) 
-{        
-    unsigned char ptrCommand[64], *ptrToken;
-    unsigned char delimiters[] = "$>[\r ";
-    int dataIndex = 0, intValue = 0;
-    static unsigned char arrByteData[MAX_NVRAM_ADDRESS]; //  = {0x08, 0x00, 0x00, 0x09, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01};
-
-    ptrToken = strtok(ptrBuffer, delimiters);
-    
-    if (ptrToken==NULL) return (false);
-    if (strlen(ptrToken) > 64) return false;
-    strcpy (ptrCommand, ptrToken);    
-    dataIndex = 0;
-    do
-    {
-        ptrToken = strtok(NULL, delimiters);
-        if (ptrToken)
-        {
-            intValue = (int) strtol(ptrToken, NULL, 16);
-            if (intValue < 0 || intValue > 255) return false;
-            if (dataIndex < MAX_NVRAM_ADDRESS)      
-            {
-                arrByteData[dataIndex] = (unsigned char) intValue;
-                dataIndex++;
-            }
-            else return false;
-        }        
-    } while (ptrToken != NULL);
-
-    if (executeCommand(ptrCommand, arrByteData)) return (true);
-    else return (false);
-}
-
 
 unsigned char SendOpcode(unsigned char opcode)
 {       
@@ -852,4 +846,84 @@ unsigned char command[1] = {ACTIVATE_STORE};
     if (!SendOpcode(STORE_NVRAM))
         return false;
     return true;
+}
+
+unsigned char processInputString(unsigned char *ptrBuffer) 
+{        
+    unsigned char ptrCommand[64], *ptrToken;
+    unsigned char delimiters[] = "$>[\r ";
+    short dataIndex = 0, intValue = 0;
+    short arrByteData[MAX_NVRAM_ADDRESS];      
+    unsigned char dataFlag = true;
+    
+    if (strchr(ptrBuffer, '@')!= NULL)    
+    {
+        if (strlen(ptrBuffer) < MAXSTRING) strcpy(strDataBufferCopy, ptrBuffer);
+        else strDataBufferCopy[0] = '\0';       
+        dataFlag = false;
+    }    
+
+    ptrToken = strtok(ptrBuffer, delimiters);
+    
+    if (ptrToken==NULL) return (false);
+    if (strlen(ptrToken) > 64) return false;        
+    strcpy (ptrCommand, ptrToken);     
+    if (dataFlag)
+    {
+        dataIndex = 0;
+        do
+        {
+            ptrToken = strtok(NULL, delimiters);
+            if (ptrToken)
+            {         
+                intValue = (int) strtol(ptrToken, NULL, 16);            
+                if (dataIndex < MAX_NVRAM_ADDRESS)      
+                {
+                    arrByteData[dataIndex] = (short) intValue;
+                    dataIndex++;
+                }
+                else return false;
+            }        
+        } while (ptrToken != NULL);
+    }
+    if (executeCommand(ptrCommand, arrByteData)) return (true);
+    else return (false);
+}
+
+unsigned char storeVersionString()
+{
+int i, j, length;
+char ch = 0;
+
+    length = strlen(strDataBufferCopy);
+    
+    if (length == 0 || length > MAXSTRING) return false;    
+    
+    for (i = 0; i < length; i++)
+    {
+        ch = strDataBufferCopy[i];
+        if (ch == '$') break;
+    }
+
+    if (ch != '$') return false;
+
+    for (i = i; i < length; i++)
+    {
+        ch = strDataBufferCopy[i];
+        if (ch == ' ') break;
+    }
+
+    if (ch != ' ') return false;
+
+    j = 0;
+    for (i = i; i < length; i++)
+    {
+        ch = strDataBufferCopy[i];
+        if (ch == '[') break;
+        if (j >= MAXSTRING-2) return false;
+        strPCapFirmwareVersion[j++] = ch;        
+    }
+    strPCapFirmwareVersion[j] = '\0';
+    if (ch != '[') return false;
+    else return true;
 }

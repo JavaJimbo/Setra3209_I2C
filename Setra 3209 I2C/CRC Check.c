@@ -74,6 +74,7 @@ UINT16 update_crc_16(UINT16 crc, char nextVal) {
 UINT16 CRCcalculate(char *ptrPacket, BOOL addCRCtoPacket) {
     UINT16 CRCresult;
     int i, length;
+    char ch;
 
     length = strlen(ptrPacket);
     if (length > (MAXBUFFER - 8)) {
@@ -84,7 +85,11 @@ UINT16 CRCcalculate(char *ptrPacket, BOOL addCRCtoPacket) {
     CRCresult = 0;
 
     for (i = 0; i < length; i++)
+    {
+        ch = ptrPacket[i];
+        if (ch == '[') break;
         CRCresult = update_crc_16(CRCresult, ptrPacket[i]);
+    }
 
     if (addCRCtoPacket) {
         char strHexCRC[8];
@@ -97,16 +102,18 @@ UINT16 CRCcalculate(char *ptrPacket, BOOL addCRCtoPacket) {
 BOOL CRCcheck(char *ptrPacket) {	
 	char *ptrCRC;
 	char strCRC[8];	
+    char stringCopy[128];
     int intCRCvalue, intCRCcheck;
     
 	if (ptrPacket == NULL) return (FALSE);
+    strcpy(stringCopy, ptrPacket);
 								
 	ptrCRC = strchr(ptrPacket, '[');		// Find the bracket marking the beginning of the CRC, for example: [A2C5]	
 	if (ptrCRC == NULL) return (FALSE);		// Make sure bracket has been found    
 											// Once this routine has completed, CRC will no longer be needed,
-	ptrCRC[0] = '\0';						// So terminate string at first bracket.
+	// ptrCRC[0] = '\0';						// So terminate string at first bracket.
 											// Now when routine is done, ptrPacket will only include data before CRC
-											// This makes it easier to process data.
+											// This makes it easier to process data.    
     strCRC[0] = '0';
     strCRC[1] = 'x';        
 	strCRC[2] = ptrCRC[1];
@@ -117,8 +124,10 @@ BOOL CRCcheck(char *ptrPacket) {
 	
 	intCRCvalue = strtol(strCRC, NULL, 16);		
     intCRCcheck = CRCcalculate(ptrPacket, FALSE);
+    
 
-    if (intCRCcheck == intCRCvalue) return (TRUE);
+    if (intCRCcheck == intCRCvalue) 
+        return (TRUE);
     return (FALSE);
 }
 
