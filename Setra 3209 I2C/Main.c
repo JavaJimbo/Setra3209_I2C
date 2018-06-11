@@ -16,6 +16,8 @@
  * 6-06-18: Setra: added leading ">"; Created $HELLO command; 
  *          Added routine for writing/reading firmware version number.
  * 6-07-18: Got rid of first and last characters '>' and '<'
+ * 6-08-18:	Boxborough: bumped PCap baud rate up to 115200
+ * 6-10-18: Warwick: 
  ************************************************************************************************************/
 
 enum {
@@ -211,7 +213,7 @@ void InitializeSystem(void) {
     UARTSetFifoMode(HOSTuart, UART_INTERRUPT_ON_TX_DONE | UART_INTERRUPT_ON_RX_NOT_EMPTY);
     UARTSetLineControl(HOSTuart, UART_DATA_SIZE_8_BITS | UART_PARITY_NONE | UART_STOP_BITS_1);
 #define SYS_FREQ 80000000
-    UARTSetDataRate(HOSTuart, SYS_FREQ, 57600);
+    UARTSetDataRate(HOSTuart, SYS_FREQ, 115200);
     UARTEnable(HOSTuart, UART_ENABLE_FLAGS(UART_PERIPHERAL | UART_RX | UART_TX));
 
     // Configure HOST UART Interrupts
@@ -511,8 +513,8 @@ unsigned char executeCommand(unsigned char *ptrCommand, short *ptrData)
         if (!PcapWriteNVRAM(0x0000, MAX_NVRAM_ADDRESS, NVRAMdata))
             strcpy(strReply, "$I2C_ERROR");        
     } 
-    else if (!strcmp(ptrCommand, "CHECK_NVRAM"))
-    {
+    else if (!strcmp(ptrCommand, "CHECK_MAP"))
+    {        
         for (i = 0; i < MAX_NVRAM_ADDRESS; i++)
         {
           if (NVRAMdata[i] != CopyNVRAMdata[i]) break;
@@ -561,7 +563,7 @@ unsigned char executeCommand(unsigned char *ptrCommand, short *ptrData)
                 strcat(strReply, strHexValue);
             }                 
         }
-        else  strcpy(strReply, "$I2C_ERROR");        
+        else  strcpy(strReply, "$PCAP ERROR");        
     }       
     
     else if (!strcmp(ptrCommand, "WRITE"))
@@ -789,8 +791,10 @@ unsigned char   PcapReadNVRAM(unsigned short startAddress, unsigned short numByt
 
 unsigned char   PcapReadResultRegisters(unsigned char registerAddress, unsigned short numBytes, unsigned char *ptrData)
 {
-    unsigned short i;        
-    
+    unsigned short i;   
+       
+    for (i = 0; i < numBytes; i++) ptrData[i] = 0;    
+   
     // printf("\rReading %d bytes @ %d", numBytes, startAddress);
         
     StartI2C(); // Send the Start Bit
