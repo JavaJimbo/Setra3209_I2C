@@ -18,6 +18,8 @@
  * 6-07-18: Got rid of first and last characters '>' and '<'
  * 6-08-18:	Boxborough: bumped PCap baud rate up to 115200
  * 6-10-18: Warwick: 
+ * 6-13-18: Boxborough: no new changes
+ * 6-14-18: Tried I2C addressing.
  ************************************************************************************************************/
 
 enum {
